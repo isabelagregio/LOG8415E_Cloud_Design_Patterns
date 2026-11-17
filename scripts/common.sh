@@ -16,7 +16,7 @@ print(value)
 PY
 }
 
-ssh_args=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=7 -o ServerAliveInterval=15)
+ssh_args=(-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=7 -o ServerAliveInterval=15)
 ssh_base() {
   local node="$1"; shift
   local key="$STATE/id_ed25519"
@@ -27,7 +27,7 @@ ssh_base() {
     ssh -i "$key" "${ssh_args[@]}" "$host" "$@"
   else
     host="ubuntu@$(field "ips.$node.private")"
-    ssh -i "$key" "${ssh_args[@]}" -o "ProxyCommand=ssh -i $key -o BatchMode=yes -o StrictHostKeyChecking=accept-new -W %h:%p $jump" "$host" "$@"
+    ssh -i "$key" "${ssh_args[@]}" -o "ProxyCommand=ssh -i $key -o BatchMode=yes -o StrictHostKeyChecking=no -W %h:%p $jump" "$host" "$@"
   fi
 }
 

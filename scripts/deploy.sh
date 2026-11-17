@@ -3,7 +3,12 @@ set -euo pipefail
 source "$(dirname "$0")/common.sh"
 python3 -c 'import boto3' || { echo 'Install boto3 first (see README)' >&2; exit 1; }
 for tool in aws ssh ssh-keygen openssl; do command -v "$tool" >/dev/null || { echo "Missing: $tool" >&2; exit 1; }; done
-python3 "$ROOT/infra/aws.py" deploy
+if [[ ! -f "$STATE/aws.json" ]]; then
+  python3 "$ROOT/infra/aws.py" deploy
+else
+  echo 'Reusing existing AWS infrastructure from .state/aws.json'
+fi
+python3 "$ROOT/scripts/refresh_access.py"
 for node in gatekeeper trusted proxy primary replica1 replica2; do
   echo "Waiting for SSH: $node"
   wait_ssh "$node"

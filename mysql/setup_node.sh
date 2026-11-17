@@ -37,3 +37,4 @@ fi
 systemctl enable mysql >/dev/null
 systemctl restart mysql
 mysql -N -e 'SELECT VERSION(), @@server_id, @@gtid_mode;'
+[[ "$(mysql -N -e 'SELECT @@bind_address')" == '0.0.0.0' ]] || { echo 'MySQL is not listening on private interfaces' >&2; exit 1; }

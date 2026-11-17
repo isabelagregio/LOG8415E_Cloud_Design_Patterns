@@ -42,3 +42,4 @@ done
 printf "CREATE TABLE IF NOT EXISTS sakila.replication_probe (id INT PRIMARY KEY, note VARCHAR(32));\nINSERT INTO sakila.replication_probe VALUES (1, 'ready') ON DUPLICATE KEY UPDATE note=VALUES(note);\n" | ssh_base primary 'sudo mysql'
 "$ROOT/scripts/verify.sh"
 "$ROOT/scripts/setup_proxy.sh"
+"$ROOT/scripts/setup_gateway.sh"

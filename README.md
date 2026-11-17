@@ -10,13 +10,32 @@ Use the AWS Academy Learner Lab terminal with valid temporary AWS credentials, P
 ./scripts/deploy.sh
 ```
 
-A clean deploy provisions the EC2 instances, configures MySQL replication and installs the HTTP Proxy on its existing instance. When infrastructure already exists and MySQL replication works, **do not repeat deploy**. Install only the Proxy:
+A clean deploy provisions the EC2 instances, configures MySQL replication and installs the HTTP Proxy, Trusted Host and Gatekeeper on their existing instances. When infrastructure already exists and MySQL replication works, **do not repeat deploy**. Install the application services on the existing instances:
 
 ```bash
 ./scripts/setup_proxy.sh
+./scripts/setup_gateway.sh
 ```
 
 SSH access is refreshed automatically the first time an SSH connection is made in each shell/script session. The refresh updates the Gatekeeper's public IP and the terminal's current `/32` access rule without creating new EC2 instances. It still requires valid Learner Lab AWS credentials.
+
+## Gatekeeper and Trusted Host
+
+The public Gatekeeper (`8000`) forwards HTTP requests to the private Trusted Host (`8001`). The Trusted Host validates query requests and forwards them to the private Proxy (`8002`). The Proxy handles database routing. Both HTTP services use Python's standard library and run as `systemd` services. The public port `8000` is limited to the current lab terminal IP by the Gatekeeper Security Group.
+
+To install the two services on the already provisioned EC2 instances (no new infrastructure):
+
+```bash
+./scripts/setup_gateway.sh
+```
+
+To check the complete chain and make a query from the lab terminal:
+
+```bash
+source scripts/common.sh
+ssh_base gatekeeper 'curl -fsS http://127.0.0.1:8000/health'
+ssh_base gatekeeper "curl -sS -X POST http://127.0.0.1:8000/query -H 'Content-Type: application/json' -d '{\"sql\":\"SELECT COUNT(*) AS films FROM film\",\"policy\":\"random\"}'"
+```
 
 ## Proxy
 

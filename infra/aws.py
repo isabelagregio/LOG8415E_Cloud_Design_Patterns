@@ -274,6 +274,13 @@ def teardown():
         except ClientError as e:
             if e.response['Error']['Code'] not in ('InvalidGroup.NotFound', 'InvalidSubnetID.NotFound', 'InvalidVpcID.NotFound', 'InvalidRouteTableID.NotFound', 'InvalidAssociationID.NotFound', 'InvalidInternetGatewayID.NotFound', 'InvalidAllocationID.NotFound', 'InvalidKeyPair.NotFound'):
                 raise
+    # Benchmark logs are project-owned; raw CSV/JSON results remain on disk.
+    try:
+        boto3.client('logs', region_name=s['region']).delete_log_group(
+            logGroupName='/log8415e/benchmark')
+    except ClientError as error:
+        if error.response['Error']['Code'] != 'ResourceNotFoundException':
+            print('Warning: could not remove benchmark CloudWatch log group: {}'.format(error), file=sys.stderr)
     STATE_FILE.unlink()
     print('Project AWS resources removed. Local SSH key retained in .state/.')
 

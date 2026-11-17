@@ -23,7 +23,7 @@ terraform_install() {
   url="https://releases.hashicorp.com/terraform/${version}"
   curl -fsSL --retry 3 "$url/terraform_${version}_linux_${arch}.zip" -o "$temp/terraform.zip"
   curl -fsSL --retry 3 "$url/terraform_${version}_SHA256SUMS" -o "$temp/SHA256SUMS"
-  (cd "$temp" && grep " terraform_${version}_linux_${arch}.zip$" SHA256SUMS | sha256sum -c -)
+  (cd "$temp" && grep " terraform_${version}_linux_${arch}.zip$" SHA256SUMS | sed "s|terraform_${version}_linux_${arch}.zip|terraform.zip|" | sha256sum -c -)
   python3 -m zipfile -e "$temp/terraform.zip" "$ROOT/.tools"
   chmod 755 "$ROOT/.tools/terraform"
   rm -rf "$temp"

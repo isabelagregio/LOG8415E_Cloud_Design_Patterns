@@ -15,7 +15,10 @@ if ! swapon --show=NAME | grep -qx /swapfile; then
   swapon /swapfile
   grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
-apt-get update -qq
+apt-get update \
+  -o Acquire::ForceIPv4=true \
+  -o APT::Update::Error-Mode=any \
+  -o Acquire::Retries=3
 apt-get install -y -qq mysql-server curl ca-certificates tar
 cat > /etc/mysql/mysql.conf.d/99-log8415e.cnf <<CONF
 [mysqld]

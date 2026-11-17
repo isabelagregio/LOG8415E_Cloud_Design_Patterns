@@ -10,3 +10,8 @@
 *.pem
 *.key
 __pycache__/
+
+.state/
+.secrets/
+*.pem
+*.key

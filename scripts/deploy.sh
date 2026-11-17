@@ -22,10 +22,10 @@ done
 echo 'Loading Sakila on primary'
 ssh_base primary 'sudo bash -s' < "$ROOT/mysql/load_sakila.sh"
 if [[ ! -s "$SECRETS/replication_password" ]]; then
-  (umask 077; openssl rand -hex 24 > "$SECRETS/replication_password")
+  (umask 077; openssl rand -hex 16 > "$SECRETS/replication_password")
 fi
 password="$(cat "$SECRETS/replication_password")"
-[[ "$password" =~ ^[0-9a-f]{48}$ ]] || { echo 'Invalid replication password file' >&2; exit 1; }
+[[ "$password" =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid replication password file' >&2; exit 1; }
 # Password is random hexadecimal, allowing safe escaping in this generated SQL.
 printf "CREATE USER IF NOT EXISTS 'log8415e_repl'@'10.42.2.%%' IDENTIFIED BY '%s';\nALTER USER 'log8415e_repl'@'10.42.2.%%' IDENTIFIED BY '%s';\nGRANT REPLICATION SLAVE ON *.* TO 'log8415e_repl'@'10.42.2.%%';\n" "$password" "$password" | ssh_base primary 'sudo mysql'
 # GTIDs are retained in the dump so replicas know the consistent starting point.

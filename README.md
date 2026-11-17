@@ -1,102 +1,92 @@
 # LOG8415E — Cloud Design Patterns
 
-Six EC2 instances: a public Gatekeeper and private Trusted Host, Proxy, MySQL Primary and two MySQL replicas. The Primary contains Sakila and replicates changes asynchronously to both replicas.
+AWS Academy Learner Lab project: six EC2 instances, with a public Gatekeeper, private Trusted Host and Proxy, and a self-managed MySQL 8 primary with two asynchronous replicas. Sakila is loaded on the primary and replicated to both replicas.
 
-## Setup
+## Requirements
 
-Use the AWS Academy Learner Lab terminal with valid temporary AWS credentials, Python virtual environment and `boto3` installed. Keep `.state/` and `.secrets/` locally; neither belongs in Git.
+Run from the Learner Lab terminal with current AWS temporary credentials, AWS CLI, SSH, `openssl`, Python and `boto3` in the active virtual environment. No new IAM roles are created; infrastructure uses the existing LabInstanceProfile / LabRole. The AWS credentials are configured **outside this repository**.
+
+Never commit `.state/`, `.secrets/` or the SSH private key. Retain those local folders until teardown is complete. The lab's terminal IP can change between sessions; the scripts refresh the Gatekeeper Security Group automatically.
+
+## Deployment
+
+For a clean environment:
 
 ```bash
+source .venv/bin/activate
 ./scripts/deploy.sh
 ```
 
-A clean deploy provisions the EC2 instances, configures MySQL replication and installs the HTTP Proxy, Trusted Host and Gatekeeper on their existing instances. When infrastructure already exists and MySQL replication works, **do not repeat deploy**. Install the application services on the existing instances:
+This provisions six EC2 instances, configures MySQL + Sakila + replication, and installs the Proxy, Trusted Host and Gatekeeper. The MySQL installer corrects Ubuntu's default loopback-only `bind-address` for inter-instance connectivity. Only the Gatekeeper has a public IP. Private ingress is limited to the respective Security Group peers.
+
+**If the six EC2 instances are already running, do not rerun deploy.** To install or update just the application components:
 
 ```bash
 ./scripts/setup_proxy.sh
 ./scripts/setup_gateway.sh
 ```
 
-SSH access is refreshed automatically the first time an SSH connection is made in each shell/script session. The refresh updates the Gatekeeper's public IP and the terminal's current `/32` access rule without creating new EC2 instances. It still requires valid Learner Lab AWS credentials.
+`setup_gateway.sh` generates a local `.secrets/gatekeeper_token` on first use. The token is installed only on Gatekeeper with restricted file permissions, not in Git, Trusted Host or Proxy. The Gatekeeper requires it on `POST /query`; `/health` remains accessible for checks. HTTP and a single-source-IP ingress rule are used for this Learner Lab demo, **not** a production-ready HTTPS configuration.
 
-## Gatekeeper and Trusted Host
-
-The public Gatekeeper (`8000`) forwards HTTP requests to the private Trusted Host (`8001`). The Trusted Host validates query requests and forwards them to the private Proxy (`8002`). The Proxy handles database routing. Both HTTP services use Python's standard library and run as `systemd` services. The public port `8000` is limited to the current lab terminal IP by the Gatekeeper Security Group.
-
-To install the two services on the already provisioned EC2 instances (no new infrastructure):
+## Verification and request flow
 
 ```bash
-./scripts/setup_gateway.sh
+./scripts/verify.sh
 ```
 
-To check the complete chain and make a query from the lab terminal:
+Both replicas must show `IO=Yes`, `SQL=Yes` and 1,000 Sakila film records. To send a request from the lab terminal through the **public endpoint** (all services in the required path):
 
 ```bash
 source scripts/common.sh
-ssh_base gatekeeper 'curl -fsS http://127.0.0.1:8000/health'
-ssh_base gatekeeper "curl -sS -X POST http://127.0.0.1:8000/query -H 'Content-Type: application/json' -d '{\"sql\":\"SELECT COUNT(*) AS films FROM film\",\"policy\":\"random\"}'"
+ensure_access
+TOKEN="$(cat .secrets/gatekeeper_token)"
+GATEKEEPER="http://$(field ips.gatekeeper.public):8000"
+curl -sS -X POST "$GATEKEEPER/query" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"sql":"SELECT COUNT(*) AS films FROM film","policy":"random"}'
 ```
 
-## Proxy
+Change `random` to `direct` or `latency` to demonstrate each routing policy. Direct reads go to Primary; Random reads uniformly select a replica; Latency-aware checks replica latency and selects the faster healthy replica. Writes always go to Primary. `SELECT`, `INSERT`, `UPDATE` and `DELETE` are the only supported SQL operations. The Gatekeeper rejects missing/incorrect bearer tokens with HTTP 401 and invalid requests with HTTP 400.
 
-The Proxy runs on private EC2 port `8002`, reachable from the Trusted Host. It accepts `POST /query` with a SQL statement and optional parameters:
-
-```json
-{"sql":"SELECT film_id, title FROM film LIMIT 3", "policy":"random"}
-```
-
-Read policies:
-- `direct`: read from Primary
-- `random`: pick either replica
-- `latency`: query both replicas with `SELECT 1` and choose the fastest response
-
-`INSERT`, `UPDATE` and `DELETE` always go to Primary. Only these operations and `SELECT` are accepted. Responses contain the node, rows or affected count, and request duration. `GET /health` checks the HTTP service.
-
-To test from the lab terminal using the existing SSH jump:
+Example rejection (missing token):
 
 ```bash
-source scripts/common.sh
-ssh_base proxy "curl -s http://localhost:8002/health"
-ssh_base proxy "curl -s -X POST http://localhost:8002/query -H 'Content-Type: application/json' -d '{\"sql\":\"SELECT COUNT(*) AS films FROM film\",\"policy\":\"latency\"}'"
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "$GATEKEEPER/query" \
+  -H 'Content-Type: application/json' -d '{"sql":"SELECT 1"}'
 ```
 
-Verify replication with `./scripts/verify.sh` and clean up AWS resources with `./scripts/teardown.sh` when the project is finished. Teardown removes the project's AWS infrastructure.
+## Benchmark and CloudWatch
 
-## Benchmarks and CloudWatch
-
-The benchmark runs from the Learner Lab terminal through the **public Gatekeeper** and
-therefore exercises the entire Gatekeeper → Trusted Host → Proxy → MySQL request path.
-It uses a small asynchronous Python client (five concurrent requests by default).
-For each of `direct`, `random` and `latency`, it warms up with 20 reads, then sends
-**1,000 writes and 1,000 reads**. Writes use existing `sakila.replication_probe`
-with repeatable IDs, so running the benchmark again will not create extra tables.
-
-With the lab's temporary AWS credentials active and the existing EC2s running:
+Run once after a successful deployment:
 
 ```bash
-source .venv/bin/activate
 ./scripts/benchmark.sh
 ```
 
-The script refreshes the current lab terminal IP automatically. Results are saved to
-`results/<UTC-run-time>/`: one CSV of raw requests per policy and a `summary.json`
-with p50/p95/p99 client latencies, throughput, errors, node distribution, and
-replication lag (`Seconds_Behind_Source`) sampled after writes and after reads.
-The lag samples are snapshots, **not** maximum lag throughout the experiment;
-zero lag does not rule out temporary stale reads.
+The custom Python client uses five concurrent requests by default. After a warm-up, it sends 1,000 writes and 1,000 reads for **each** policy through the public Gatekeeper. The benchmark automatically reads the local Gatekeeper token. To perform a small connectivity test without publishing to CloudWatch:
 
-The same benchmark sends individual request logs to CloudWatch Logs group
-`/log8415e/benchmark` and aggregate metrics to CloudWatch namespace
-`LOG8415E/Benchmark`. This uses the lab terminal's `boto3` credentials rather
-than installing another daemon or IAM role on the EC2s. If the Learner Lab
-blocks CloudWatch write APIs, the local CSV/JSON files are kept and the script
-reports the publication failure explicitly.
+```bash
+./scripts/benchmark.sh --requests 10 --no-cloudwatch
+```
 
-To test the benchmark logic locally without publishing CloudWatch data, run
-`python3 benchmark/run.py --url http://127.0.0.1:8000 --requests 5 --no-cloudwatch`
-against a local test server. This does **not** satisfy the required load test.
+Outputs are saved to `results/<timestamp>/`: `direct.csv`, `random.csv`, `latency.csv` (per-request observations) and `summary.json` (throughput, p50/p95/p99, error rate, per-node request counts, replication lag). Replication lag is sampled after writes and reads; it is not the maximum lag over the entire run. Save **all raw results** for the submission and report before ending the lab.
 
-After collecting the results, preserve the CSV/JSON files for the report. Run
-`./scripts/teardown.sh` when finished with AWS resources (not during development).
-The teardown also removes the benchmark CloudWatch log group. Save screenshots or
-CloudWatch evidence for the report before teardown; local CSV/JSON results remain.
+The benchmark also publishes request logs to `/log8415e/benchmark` and aggregated CloudWatch Metrics to `LOG8415E/Benchmark`, using temporary Learner Lab credentials from the terminal. Check both in the CloudWatch console. No CloudWatch agent or new IAM role is required.
+
+## Reproducibility and teardown
+
+The normal workflow is:
+
+```bash
+./scripts/deploy.sh
+./scripts/verify.sh
+./scripts/benchmark.sh
+./scripts/teardown.sh
+```
+
+**Only run teardown after recording the demo, saving the benchmark outputs and CloudWatch evidence.** Teardown deletes this project's EC2 instances, VPC resources, NAT Gateway, Elastic IP, key pair and its benchmark log group. The local results remain. CloudWatch custom metric data can remain available until AWS retention expires. Keep the local `.state/` backup until teardown succeeds; do not delete it manually beforehand.
+
+## Submission
+
+The course requires a **private** GitHub repository (or ZIP), source and raw benchmark results, a LaTeX-generated PDF report (~12–20 pages), and a **10–15 minute** demo video showing deployment, routing, security isolation, benchmark results and teardown. Include a cost estimate, threat model, stale-read discussion, architecture diagrams, and an AI-use disclosure in the report. Never show temporary AWS credentials or the Gatekeeper token in the video.

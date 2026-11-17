@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """HTTP forwarding for Gatekeeper (8000) and Trusted Host (8001)."""
+import hmac
 import json
+import os
 import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +12,9 @@ from urllib.request import Request, urlopen
 ROLE, UPSTREAM, PORT = sys.argv[1], sys.argv[2].rstrip('/'), int(sys.argv[3])
 if ROLE not in ('gatekeeper', 'trusted'):
     raise SystemExit('role must be gatekeeper or trusted')
+TOKEN = os.environ.get('GATEKEEPER_TOKEN')
+if ROLE == 'gatekeeper' and not TOKEN:
+    raise SystemExit('GATEKEEPER_TOKEN is required')
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -40,22 +45,27 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != '/query':
             return self.respond(404, b'{"error":"not found"}')
+        if ROLE == 'gatekeeper':
+            supplied = self.headers.get('Authorization', '')
+            if not hmac.compare_digest(supplied, 'Bearer ' + TOKEN):
+                return self.respond(401, b'{"error":"unauthorized"}')
         try:
             size = int(self.headers.get('Content-Length', '0'))
             if size <= 0 or size > 65536:
                 raise ValueError('invalid request size')
             body = self.rfile.read(size)
-            if ROLE == 'trusted':
-                payload = json.loads(body)
-                if not isinstance(payload, dict):
-                    raise ValueError('JSON object required')
-                sql = payload.get('sql')
-                if not isinstance(sql, str) or not re.match(r'^\s*(SELECT|INSERT|UPDATE|DELETE)\b', sql, re.I):
-                    raise ValueError('invalid SQL operation')
-                if not isinstance(payload.get('params', []), (list, dict)):
-                    raise ValueError('invalid SQL parameters')
-                if payload.get('policy', 'direct') not in ('direct', 'random', 'latency'):
-                    raise ValueError('invalid read policy')
+            payload = json.loads(body)
+            if not isinstance(payload, dict):
+                raise ValueError('JSON object required')
+            sql = payload.get('sql')
+            if not isinstance(sql, str) or not re.match(r'^\s*(SELECT|INSERT|UPDATE|DELETE)\b', sql, re.I):
+                raise ValueError('invalid SQL operation')
+            if ';' in sql:
+                raise ValueError('one SQL statement required')
+            if not isinstance(payload.get('params', []), (list, dict)):
+                raise ValueError('invalid SQL parameters')
+            if payload.get('policy', 'direct') not in ('direct', 'random', 'latency'):
+                raise ValueError('invalid read policy')
             self.forward('POST', '/query', body)
         except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
             self.respond(400, json.dumps({'error': str(error)}).encode())

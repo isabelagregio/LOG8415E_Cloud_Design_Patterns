@@ -187,7 +187,7 @@ def provision():
                           BlockDeviceMappings=[{'DeviceName': '/dev/sda1', 'Ebs': {'VolumeSize': 16, 'VolumeType': 'gp3', 'DeleteOnTermination': True}}],
                           TagSpecifications=[{'ResourceType': 'instance', 'Tags': [
                               {'Key': 'Name', 'Value': 'log8415e-' + name}, {'Key': 'Project', 'Value': 'LOG8415E-final'}]}])
-            # Instance profile is optional for Marco 1; used for CloudWatch in later milestones.
+            # Use only the lab-provided instance profile.
             if profile:
                 params['IamInstanceProfile'] = {'Name': profile}
             result = ec2.run_instances(**params)['Instances'][0]

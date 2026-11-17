@@ -1,12 +1,12 @@
-# Local infrastructure state and credentials
+# Learner Lab state, secrets and generated results
 .state/
 .secrets/
-.tools/
-**/.terraform/
-**/terraform.tfstate
-**/terraform.tfstate.*
-**/terraform.tfvars
-**/*.tfplan
+.venv/
+results/
+__pycache__/
+*.pyc
 *.pem
 *.key
-__pycache__/
+core
+core.*
+*.zip

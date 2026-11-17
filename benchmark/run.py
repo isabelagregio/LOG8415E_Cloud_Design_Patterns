@@ -5,6 +5,7 @@ import asyncio
 import csv
 import json
 import math
+import os
 import subprocess
 import time
 import urllib.error
@@ -18,6 +19,8 @@ import boto3
 
 ROOT = Path(__file__).resolve().parent.parent
 POLICIES = ('direct', 'random', 'latency')
+TOKEN_FILE = ROOT / '.secrets' / 'gatekeeper_token'
+AUTH_TOKEN = os.environ.get('GATEKEEPER_TOKEN') or (TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else None)
 
 
 def percentile(values, p):
@@ -32,8 +35,10 @@ def percentile(values, p):
 
 def request(url, payload):
     body = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(url + '/query', data=body,
-                                 headers={'Content-Type': 'application/json'}, method='POST')
+    headers = {'Content-Type': 'application/json'}
+    if AUTH_TOKEN:
+        headers['Authorization'] = 'Bearer ' + AUTH_TOKEN
+    req = urllib.request.Request(url + '/query', data=body, headers=headers, method='POST')
     started_at_ms = int(time.time() * 1000)
     start = time.monotonic()
     try:
@@ -164,6 +169,8 @@ def main():
     args = parser.parse_args()
     if args.requests < 1 or args.concurrency < 1:
         parser.error('requests and concurrency must be positive')
+    if not AUTH_TOKEN:
+        parser.error('Gatekeeper token not found; run setup_gateway.sh first')
     state_file = ROOT / '.state' / 'aws.json'
     state = json.loads(state_file.read_text()) if state_file.exists() else None
     if not args.url and not state:

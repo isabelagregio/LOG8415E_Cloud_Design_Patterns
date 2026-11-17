@@ -20,10 +20,11 @@ apt-get update \
   -o APT::Update::Error-Mode=any \
   -o Acquire::Retries=3
 apt-get install -y -qq mysql-server curl ca-certificates tar
+sed -i 's/^bind-address[[:space:]]*=.*/bind-address = 0.0.0.0/' \
+  /etc/mysql/mysql.conf.d/mysqld.cnf
 cat > /etc/mysql/mysql.conf.d/99-log8415e.cnf <<CONF
 [mysqld]
 server-id=$ID
-bind-address=0.0.0.0
 log_bin=mysql-bin
 binlog_format=ROW
 gtid_mode=ON

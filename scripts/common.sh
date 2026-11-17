@@ -17,7 +17,15 @@ PY
 }
 
 ssh_args=(-o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=7 -o ServerAliveInterval=15)
+ensure_access() {
+  if [[ "${ACCESS_REFRESHED:-}" != 1 ]]; then
+    python3 "$ROOT/scripts/refresh_access.py" >&2
+    ACCESS_REFRESHED=1
+  fi
+}
+
 ssh_base() {
+  ensure_access
   local node="$1"; shift
   local key="$STATE/id_ed25519"
   local jump="ubuntu@$(field ips.gatekeeper.public)"

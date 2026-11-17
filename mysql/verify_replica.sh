@@ -8,4 +8,4 @@ lag="$(awk '$1=="Seconds_Behind_Source:" {print $2}' <<< "$status")"
 rows="$(mysql -N -e 'SELECT COUNT(*) FROM sakila.film;')"
 probe="$(mysql -N -e 'SELECT note FROM sakila.replication_probe WHERE id=1;' 2>/dev/null || true)"
 echo "IO=$io SQL=$sql lag=$lag film_rows=$rows probe=$probe"
-[[ "$io" == Yes && "$sql" == Yes && "$rows" == 1000 && "$probe" == marco1 ]]
+[[ "$io" == Yes && "$sql" == Yes && "$rows" == 1000 && -n "$probe" ]]

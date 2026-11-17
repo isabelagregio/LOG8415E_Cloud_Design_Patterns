@@ -1,25 +1,44 @@
-# SSH access refresh patch (Marco 1)
+# LOG8415E — Cloud Design Patterns
 
-This patch updates the current Gatekeeper public IP and the lab terminal's
-changing public egress IP. It also allows a deploy to resume using existing
-`.state/aws.json` instead of creating duplicate infrastructure.
+Six EC2 instances: a public Gatekeeper and private Trusted Host, Proxy, MySQL Primary and two MySQL replicas. The Primary contains Sakila and replicates changes asynchronously to both replicas.
 
-Files belong in `scripts/` of the repository. Never replace `.state/aws.json`.
+## Setup
 
-The lab's older SSH client does not recognize `StrictHostKeyChecking=accept-new`.
-This patch uses `StrictHostKeyChecking=no` for compatibility on the isolated
-teaching environment. This does NOT provide strong SSH server identity checking;
-for production, pin and verify host keys instead.
+Use the AWS Academy Learner Lab terminal with valid temporary AWS credentials, Python virtual environment and `boto3` installed. Keep `.state/` and `.secrets/` locally; neither belongs in Git.
 
-With valid temporary AWS credentials and an active virtual environment:
+```bash
+./scripts/deploy.sh
+```
 
-    python3 scripts/refresh_access.py
-    ./scripts/deploy.sh
+A clean deploy provisions the EC2 instances, configures MySQL replication and installs the HTTP Proxy on its existing instance. When infrastructure already exists and MySQL replication works, **do not repeat deploy**. Install only the Proxy:
 
-The initial security-group rules remain limited to a single current client IP
-(`/32`), and both port 22 and 8000 follow that IP across lab sessions.
-No EC2 instance is created by refresh_access.py.
+```bash
+./scripts/setup_proxy.sh
+```
 
-If the lab credentials have expired, obtain fresh temporary credentials from
-the learner portal before running the patch. This script does not and should
-not fetch AWS Academy session credentials automatically.
+SSH access is refreshed automatically the first time an SSH connection is made in each shell/script session. The refresh updates the Gatekeeper's public IP and the terminal's current `/32` access rule without creating new EC2 instances. It still requires valid Learner Lab AWS credentials.
+
+## Proxy
+
+The Proxy runs on private EC2 port `8002`, reachable from the Trusted Host. It accepts `POST /query` with a SQL statement and optional parameters:
+
+```json
+{"sql":"SELECT film_id, title FROM film LIMIT 3", "policy":"random"}
+```
+
+Read policies:
+- `direct`: read from Primary
+- `random`: pick either replica
+- `latency`: query both replicas with `SELECT 1` and choose the fastest response
+
+`INSERT`, `UPDATE` and `DELETE` always go to Primary. Only these operations and `SELECT` are accepted. Responses contain the node, rows or affected count, and request duration. `GET /health` checks the HTTP service.
+
+To test from the lab terminal using the existing SSH jump:
+
+```bash
+source scripts/common.sh
+ssh_base proxy "curl -s http://localhost:8002/health"
+ssh_base proxy "curl -s -X POST http://localhost:8002/query -H 'Content-Type: application/json' -d '{\"sql\":\"SELECT COUNT(*) AS films FROM film\",\"policy\":\"latency\"}'"
+```
+
+Verify replication with `./scripts/verify.sh` and clean up AWS resources with `./scripts/teardown.sh` when the project is finished. Teardown removes the project's AWS infrastructure.

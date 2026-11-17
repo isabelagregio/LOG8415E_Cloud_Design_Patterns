@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
-python3 "$ROOT/scripts/refresh_access.py"
+ensure_access
 for node in replica1 replica2; do
   echo "Checking $node"
   for attempt in $(seq 1 18); do

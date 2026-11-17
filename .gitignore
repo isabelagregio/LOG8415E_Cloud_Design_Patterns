@@ -1,17 +1,12 @@
 # Local infrastructure state and credentials
+.state/
+.secrets/
+.tools/
 **/.terraform/
 **/terraform.tfstate
 **/terraform.tfstate.*
 **/terraform.tfvars
 **/*.tfplan
-.state/
-.secrets/
-.tools/
 *.pem
 *.key
 __pycache__/
-
-.state/
-.secrets/
-*.pem
-*.key

@@ -8,7 +8,7 @@ if [[ ! -f "$STATE/aws.json" ]]; then
 else
   echo 'Reusing existing AWS infrastructure from .state/aws.json'
 fi
-python3 "$ROOT/scripts/refresh_access.py"
+ensure_access
 for node in gatekeeper trusted proxy primary replica1 replica2; do
   echo "Waiting for SSH: $node"
   wait_ssh "$node"
@@ -39,6 +39,6 @@ for node in replica1 replica2; do
   ssh_base "$node" 'sudo mysql -e "SET GLOBAL read_only=ON; SET GLOBAL super_read_only=ON;"'
   printf "CHANGE REPLICATION SOURCE TO SOURCE_HOST='%s', SOURCE_PORT=3306, SOURCE_USER='log8415e_repl', SOURCE_PASSWORD='%s', SOURCE_AUTO_POSITION=1, GET_SOURCE_PUBLIC_KEY=1;\nSTART REPLICA;\n" "$primary_ip" "$password" | ssh_base "$node" 'sudo mysql'
 done
-printf "CREATE TABLE IF NOT EXISTS sakila.replication_probe (id INT PRIMARY KEY, note VARCHAR(32));\nINSERT INTO sakila.replication_probe VALUES (1, 'marco1') ON DUPLICATE KEY UPDATE note=VALUES(note);\n" | ssh_base primary 'sudo mysql'
+printf "CREATE TABLE IF NOT EXISTS sakila.replication_probe (id INT PRIMARY KEY, note VARCHAR(32));\nINSERT INTO sakila.replication_probe VALUES (1, 'ready') ON DUPLICATE KEY UPDATE note=VALUES(note);\n" | ssh_base primary 'sudo mysql'
 "$ROOT/scripts/verify.sh"
-echo 'Marco 1 deployed.'
+"$ROOT/scripts/setup_proxy.sh"

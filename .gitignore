@@ -1,0 +1,19 @@
+# Terraform state, plans and provider binaries
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/terraform.tfvars
+**/terraform.tfvars.json
+
+# Secrets and temporary dumps
+.secrets/
+.state/
+*.pem
+*.key
+
+# Python and OS
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision the six EC2 nodes for LOG8415E using boto3.
+"""Provision the seven EC2 nodes for LOG8415E using boto3.
 
 The JSON state is local and must never be committed. No resources are deleted on
 provision failures: run teardown after investigating any partial deployment.
@@ -23,7 +23,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / '.state'
 STATE_FILE = STATE_DIR / 'aws.json'
-NODES = ['gatekeeper', 'trusted', 'proxy', 'primary', 'replica1', 'replica2']
+NODES = ['gatekeeper', 'trusted', 'proxy', 'primary', 'replica1', 'replica2', 'replica3']
 PORTS = {'gatekeeper': 8000, 'trusted': 8001, 'proxy': 8002}
 CIDR_VPC = '10.42.0.0/16'
 CIDR_PUBLIC = '10.42.1.0/24'
@@ -173,9 +173,9 @@ def provision():
             allow(ec2, groups[name], 22, source_sg=groups['gatekeeper'])
         allow(ec2, groups['trusted'], 8001, source_sg=groups['gatekeeper'])
         allow(ec2, groups['proxy'], 8002, source_sg=groups['trusted'])
-        for name in ('primary', 'replica1', 'replica2'):
+        for name in ('primary', 'replica1', 'replica2', 'replica3'):
             allow(ec2, groups[name], 3306, source_sg=groups['proxy'])
-        for name in ('replica1', 'replica2'):
+        for name in ('replica1', 'replica2', 'replica3'):
             allow(ec2, groups['primary'], 3306, source_sg=groups[name])
         keyname = ensure_key(s, ec2)
         profile = os.environ.get('INSTANCE_PROFILE_NAME', 'LabInstanceProfile')

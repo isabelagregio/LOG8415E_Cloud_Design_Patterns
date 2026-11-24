@@ -9,11 +9,11 @@ else
   echo 'Reusing existing AWS infrastructure from .state/aws.json'
 fi
 ensure_access
-for node in gatekeeper trusted proxy primary replica1 replica2; do
+for node in gatekeeper trusted proxy primary replica1 replica2 replica3; do
   echo "Waiting for SSH: $node"
   wait_ssh "$node"
 done
-for entry in primary:1 replica1:2 replica2:3; do
+for entry in primary:1 replica1:2 replica2:3 replica3:4; do
   node="${entry%%:*}"; server_id="${entry##*:}"
   role=replica; [[ "$node" == primary ]] && role=primary
   echo "Installing MySQL on $node"
@@ -32,7 +32,7 @@ printf "CREATE USER IF NOT EXISTS 'log8415e_repl'@'10.42.2.%%' IDENTIFIED BY '%s
 ssh_base primary 'sudo mysqldump --databases sakila --single-transaction --triggers --routines --events --set-gtid-purged=ON' > "$STATE/sakila-snapshot.sql"
 [[ -s "$STATE/sakila-snapshot.sql" ]] || { echo 'Empty database snapshot' >&2; exit 1; }
 primary_ip="$(field ips.primary.private)"
-for node in replica1 replica2; do
+for node in replica1 replica2 replica3; do
   echo "Initializing $node from Sakila snapshot"
   ssh_base "$node" 'sudo mysql -e "SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;"'
   ssh_base "$node" 'sudo mysql' < "$STATE/sakila-snapshot.sql"

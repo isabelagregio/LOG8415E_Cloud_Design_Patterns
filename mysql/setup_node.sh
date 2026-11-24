@@ -3,7 +3,7 @@ set -euo pipefail
 ROLE="${1:?role required}"
 ID="${2:?server-id required}"
 [[ "$ROLE" == primary || "$ROLE" == replica ]] || exit 1
-[[ "$ID" =~ ^[123]$ ]] || exit 1
+[[ "$ID" =~ ^[1-4]$ ]] || exit 1
 export DEBIAN_FRONTEND=noninteractive
 # t3.micro has 1 GiB of RAM; create swap for package installation.
 if ! swapon --show=NAME | grep -qx /swapfile; then

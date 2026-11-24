@@ -1,0 +1,206 @@
+diff --git a/README.md b/README.md
+index 046cae9..efb2559 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # LOG8415E — Cloud Design Patterns
+ 
+-AWS Academy Learner Lab project: six EC2 instances, with a public Gatekeeper, private Trusted Host and Proxy, and a self-managed MySQL 8 primary with two asynchronous replicas. Sakila is loaded on the primary and replicated to both replicas.
++AWS Academy Learner Lab project: seven EC2 instances, with a public Gatekeeper, private Trusted Host and Proxy, and a self-managed MySQL 8 primary with three asynchronous replicas (an odd number, following replica-count best practice). Sakila is loaded on the primary and replicated to all three replicas.
+ 
+ ## Requirements
+ 
+@@ -17,9 +17,9 @@ source .venv/bin/activate
+ ./scripts/deploy.sh
+ ```
+ 
+-This provisions six EC2 instances, configures MySQL + Sakila + replication, and installs the Proxy, Trusted Host and Gatekeeper. The MySQL installer corrects Ubuntu's default loopback-only `bind-address` for inter-instance connectivity. Only the Gatekeeper has a public IP. Private ingress is limited to the respective Security Group peers.
++This provisions seven EC2 instances, configures MySQL + Sakila + replication, and installs the Proxy, Trusted Host and Gatekeeper. The MySQL installer corrects Ubuntu's default loopback-only `bind-address` for inter-instance connectivity. Only the Gatekeeper has a public IP. Private ingress is limited to the respective Security Group peers.
+ 
+-**If the six EC2 instances are already running, do not rerun deploy.** To install or update just the application components:
++**If the seven EC2 instances are already running, do not rerun deploy.** To install or update just the application components:
+ 
+ ```bash
+ ./scripts/setup_proxy.sh
+@@ -34,7 +34,7 @@ This provisions six EC2 instances, configures MySQL + Sakila + replication, and
+ ./scripts/verify.sh
+ ```
+ 
+-Both replicas must show `IO=Yes`, `SQL=Yes` and 1,000 Sakila film records. To send a request from the lab terminal through the **public endpoint** (all services in the required path):
++All three replicas must show `IO=Yes`, `SQL=Yes` and 1,000 Sakila film records. To send a request from the lab terminal through the **public endpoint** (all services in the required path):
+ 
+ ```bash
+ source scripts/common.sh
+diff --git a/benchmark/run.py b/benchmark/run.py
+index 4f7d608..c19fd2b 100644
+--- a/benchmark/run.py
++++ b/benchmark/run.py
+@@ -19,6 +19,7 @@ import boto3
+ 
+ ROOT = Path(__file__).resolve().parent.parent
+ POLICIES = ('direct', 'random', 'latency')
++REPLICAS = ('replica1', 'replica2', 'replica3')
+ TOKEN_FILE = ROOT / '.secrets' / 'gatekeeper_token'
+ AUTH_TOKEN = os.environ.get('GATEKEEPER_TOKEN') or (TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else None)
+ 
+@@ -99,7 +100,7 @@ def replica_lag(state):
+     jump = 'ubuntu@' + state['ips']['gatekeeper']['public']
+     jump_command = 'ssh -i {} -o BatchMode=yes -o StrictHostKeyChecking=no -W %h:%p {}'.format(key, jump)
+     lag = {}
+-    for name in ('replica1', 'replica2'):
++    for name in REPLICAS:
+         cmd = ['ssh', '-i', key, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no',
+                '-o', 'ConnectTimeout=7', '-o', 'ProxyCommand=' + jump_command,
+                'ubuntu@' + state['ips'][name]['private'],
+diff --git a/infra/aws.py b/infra/aws.py
+index b84d428..237b8dc 100644
+--- a/infra/aws.py
++++ b/infra/aws.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Provision the six EC2 nodes for LOG8415E using boto3.
++"""Provision the seven EC2 nodes for LOG8415E using boto3.
+ 
+ The JSON state is local and must never be committed. No resources are deleted on
+ provision failures: run teardown after investigating any partial deployment.
+@@ -23,7 +23,7 @@ except ImportError:
+ ROOT = Path(__file__).resolve().parents[1]
+ STATE_DIR = ROOT / '.state'
+ STATE_FILE = STATE_DIR / 'aws.json'
+-NODES = ['gatekeeper', 'trusted', 'proxy', 'primary', 'replica1', 'replica2']
++NODES = ['gatekeeper', 'trusted', 'proxy', 'primary', 'replica1', 'replica2', 'replica3']
+ PORTS = {'gatekeeper': 8000, 'trusted': 8001, 'proxy': 8002}
+ CIDR_VPC = '10.42.0.0/16'
+ CIDR_PUBLIC = '10.42.1.0/24'
+@@ -173,9 +173,9 @@ def provision():
+             allow(ec2, groups[name], 22, source_sg=groups['gatekeeper'])
+         allow(ec2, groups['trusted'], 8001, source_sg=groups['gatekeeper'])
+         allow(ec2, groups['proxy'], 8002, source_sg=groups['trusted'])
+-        for name in ('primary', 'replica1', 'replica2'):
++        for name in ('primary', 'replica1', 'replica2', 'replica3'):
+             allow(ec2, groups[name], 3306, source_sg=groups['proxy'])
+-        for name in ('replica1', 'replica2'):
++        for name in ('replica1', 'replica2', 'replica3'):
+             allow(ec2, groups['primary'], 3306, source_sg=groups[name])
+         keyname = ensure_key(s, ec2)
+         profile = os.environ.get('INSTANCE_PROFILE_NAME', 'LabInstanceProfile')
+diff --git a/mysql/setup_node.sh b/mysql/setup_node.sh
+index de8366d..b139a53 100755
+--- a/mysql/setup_node.sh
++++ b/mysql/setup_node.sh
+@@ -3,7 +3,7 @@ set -euo pipefail
+ ROLE="${1:?role required}"
+ ID="${2:?server-id required}"
+ [[ "$ROLE" == primary || "$ROLE" == replica ]] || exit 1
+-[[ "$ID" =~ ^[123]$ ]] || exit 1
++[[ "$ID" =~ ^[1-4]$ ]] || exit 1
+ export DEBIAN_FRONTEND=noninteractive
+ # t3.micro has 1 GiB of RAM; create swap for package installation.
+ if ! swapon --show=NAME | grep -qx /swapfile; then
+diff --git a/proxy/app.py b/proxy/app.py
+index b8c7e15..3ad5d4b 100644
+--- a/proxy/app.py
++++ b/proxy/app.py
+@@ -11,16 +11,18 @@ import pymysql
+ 
+ CONFIG = json.loads(Path('/opt/log8415e/proxy.json').read_text())
+ HOSTS = CONFIG['hosts']
++# Odd number of replicas (instructor best practice); replication remains asynchronous.
++REPLICAS = ('replica1', 'replica2', 'replica3')
+ 
+ 
+ def choose_host(policy):
+     if policy == 'direct':
+         return 'primary'
+     if policy == 'random':
+-        return random.choice(['replica1', 'replica2'])
++        return random.choice(REPLICAS)
+     if policy == 'latency':
+         delays = {}
+-        for name in ('replica1', 'replica2'):
++        for name in REPLICAS:
+             start = time.monotonic()
+             try:
+                 connection = pymysql.connect(
+@@ -37,7 +39,7 @@ def choose_host(policy):
+             except (pymysql.MySQLError, OSError):
+                 continue
+         if not delays:
+-            raise ConnectionError('Neither replica is reachable')
++            raise ConnectionError('No replica is reachable')
+         return min(delays, key=delays.get)
+     raise ValueError('policy must be direct, random or latency')
+ 
+diff --git a/scripts/deploy.sh b/scripts/deploy.sh
+index 5d75488..f954b7f 100755
+--- a/scripts/deploy.sh
++++ b/scripts/deploy.sh
+@@ -9,11 +9,11 @@ else
+   echo 'Reusing existing AWS infrastructure from .state/aws.json'
+ fi
+ ensure_access
+-for node in gatekeeper trusted proxy primary replica1 replica2; do
++for node in gatekeeper trusted proxy primary replica1 replica2 replica3; do
+   echo "Waiting for SSH: $node"
+   wait_ssh "$node"
+ done
+-for entry in primary:1 replica1:2 replica2:3; do
++for entry in primary:1 replica1:2 replica2:3 replica3:4; do
+   node="${entry%%:*}"; server_id="${entry##*:}"
+   role=replica; [[ "$node" == primary ]] && role=primary
+   echo "Installing MySQL on $node"
+@@ -32,7 +32,7 @@ printf "CREATE USER IF NOT EXISTS 'log8415e_repl'@'10.42.2.%%' IDENTIFIED BY '%s
+ ssh_base primary 'sudo mysqldump --databases sakila --single-transaction --triggers --routines --events --set-gtid-purged=ON' > "$STATE/sakila-snapshot.sql"
+ [[ -s "$STATE/sakila-snapshot.sql" ]] || { echo 'Empty database snapshot' >&2; exit 1; }
+ primary_ip="$(field ips.primary.private)"
+-for node in replica1 replica2; do
++for node in replica1 replica2 replica3; do
+   echo "Initializing $node from Sakila snapshot"
+   ssh_base "$node" 'sudo mysql -e "SET GLOBAL super_read_only=OFF; SET GLOBAL read_only=OFF;"'
+   ssh_base "$node" 'sudo mysql' < "$STATE/sakila-snapshot.sql"
+diff --git a/scripts/setup_proxy.sh b/scripts/setup_proxy.sh
+index ca97dc6..9d14804 100755
+--- a/scripts/setup_proxy.sh
++++ b/scripts/setup_proxy.sh
+@@ -9,11 +9,11 @@ fi
+ password="$(cat "$SECRETS/app_password")"
+ [[ "$password" =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid app password file' >&2; exit 1; }
+ 
+-# The account is created on the primary and replicated to both read replicas.
++# The account is created on the primary and replicated to all three read replicas.
+ printf "CREATE USER IF NOT EXISTS 'log8415e_app'@'10.42.2.%%' IDENTIFIED BY '%s';\nALTER USER 'log8415e_app'@'10.42.2.%%' IDENTIFIED BY '%s';\nGRANT SELECT, INSERT, UPDATE, DELETE ON sakila.* TO 'log8415e_app'@'10.42.2.%%';\n" "$password" "$password" | ssh_base primary 'sudo mysql'
+ 
+-# Ensure the grant has reached both replicas before starting the proxy.
+-for node in replica1 replica2; do
++# Ensure the grant has reached all three replicas before starting the proxy.
++for node in replica1 replica2 replica3; do
+   for attempt in $(seq 1 30); do
+     if ssh_base "$node" "sudo mysql -N -e \"SELECT COUNT(*) FROM mysql.user WHERE user='log8415e_app';\"" | grep -qx 1; then
+       break
+@@ -31,11 +31,11 @@ ssh_base proxy 'sudo mkdir -p /opt/log8415e'
+ ssh_base proxy 'sudo tee /opt/log8415e/proxy.py >/dev/null' < "$ROOT/proxy/app.py"
+ 
+ # Pass the password file path, not its contents, as a process argument.
+-python3 - "$SECRETS/app_password" "$(field ips.primary.private)" "$(field ips.replica1.private)" "$(field ips.replica2.private)" <<'PY' | ssh_base proxy 'sudo tee /opt/log8415e/proxy.json >/dev/null && sudo chmod 600 /opt/log8415e/proxy.json'
++python3 - "$SECRETS/app_password" "$(field ips.primary.private)" "$(field ips.replica1.private)" "$(field ips.replica2.private)" "$(field ips.replica3.private)" <<'PY' | ssh_base proxy 'sudo tee /opt/log8415e/proxy.json >/dev/null && sudo chmod 600 /opt/log8415e/proxy.json'
+ import json, sys
+ from pathlib import Path
+ print(json.dumps({'user': 'log8415e_app', 'password': Path(sys.argv[1]).read_text().strip(),
+-                  'hosts': dict(zip(('primary', 'replica1', 'replica2'), sys.argv[2:]))}))
++                  'hosts': dict(zip(('primary', 'replica1', 'replica2', 'replica3'), sys.argv[2:]))}))
+ PY
+ 
+ ssh_base proxy 'sudo tee /etc/systemd/system/log8415e-proxy.service >/dev/null' <<'SERVICE'
+diff --git a/scripts/verify.sh b/scripts/verify.sh
+index 885258e..0a04740 100755
+--- a/scripts/verify.sh
++++ b/scripts/verify.sh
+@@ -2,7 +2,7 @@
+ set -euo pipefail
+ source "$(dirname "$0")/common.sh"
+ ensure_access
+-for node in replica1 replica2; do
++for node in replica1 replica2 replica3; do
+   echo "Checking $node"
+   for attempt in $(seq 1 18); do
+     if ssh_base "$node" 'sudo bash -s' < "$ROOT/mysql/verify_replica.sh"; then break; fi

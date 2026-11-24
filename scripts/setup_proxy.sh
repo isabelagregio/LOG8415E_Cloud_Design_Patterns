@@ -9,11 +9,11 @@ fi
 password="$(cat "$SECRETS/app_password")"
 [[ "$password" =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid app password file' >&2; exit 1; }
 
-# The account is created on the primary and replicated to both read replicas.
+# The account is created on the primary and replicated to all three read replicas.
 printf "CREATE USER IF NOT EXISTS 'log8415e_app'@'10.42.2.%%' IDENTIFIED BY '%s';\nALTER USER 'log8415e_app'@'10.42.2.%%' IDENTIFIED BY '%s';\nGRANT SELECT, INSERT, UPDATE, DELETE ON sakila.* TO 'log8415e_app'@'10.42.2.%%';\n" "$password" "$password" | ssh_base primary 'sudo mysql'
 
-# Ensure the grant has reached both replicas before starting the proxy.
-for node in replica1 replica2; do
+# Ensure the grant has reached all three replicas before starting the proxy.
+for node in replica1 replica2 replica3; do
   for attempt in $(seq 1 30); do
     if ssh_base "$node" "sudo mysql -N -e \"SELECT COUNT(*) FROM mysql.user WHERE user='log8415e_app';\"" | grep -qx 1; then
       break
@@ -31,11 +31,11 @@ ssh_base proxy 'sudo mkdir -p /opt/log8415e'
 ssh_base proxy 'sudo tee /opt/log8415e/proxy.py >/dev/null' < "$ROOT/proxy/app.py"
 
 # Pass the password file path, not its contents, as a process argument.
-python3 - "$SECRETS/app_password" "$(field ips.primary.private)" "$(field ips.replica1.private)" "$(field ips.replica2.private)" <<'PY' | ssh_base proxy 'sudo tee /opt/log8415e/proxy.json >/dev/null && sudo chmod 600 /opt/log8415e/proxy.json'
+python3 - "$SECRETS/app_password" "$(field ips.primary.private)" "$(field ips.replica1.private)" "$(field ips.replica2.private)" "$(field ips.replica3.private)" <<'PY' | ssh_base proxy 'sudo tee /opt/log8415e/proxy.json >/dev/null && sudo chmod 600 /opt/log8415e/proxy.json'
 import json, sys
 from pathlib import Path
 print(json.dumps({'user': 'log8415e_app', 'password': Path(sys.argv[1]).read_text().strip(),
-                  'hosts': dict(zip(('primary', 'replica1', 'replica2'), sys.argv[2:]))}))
+                  'hosts': dict(zip(('primary', 'replica1', 'replica2', 'replica3'), sys.argv[2:]))}))
 PY
 
 ssh_base proxy 'sudo tee /etc/systemd/system/log8415e-proxy.service >/dev/null' <<'SERVICE'

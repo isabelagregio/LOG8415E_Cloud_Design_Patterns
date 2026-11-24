@@ -19,6 +19,7 @@ import boto3
 
 ROOT = Path(__file__).resolve().parent.parent
 POLICIES = ('direct', 'random', 'latency')
+REPLICAS = ('replica1', 'replica2', 'replica3')
 TOKEN_FILE = ROOT / '.secrets' / 'gatekeeper_token'
 AUTH_TOKEN = os.environ.get('GATEKEEPER_TOKEN') or (TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else None)
 
@@ -99,7 +100,7 @@ def replica_lag(state):
     jump = 'ubuntu@' + state['ips']['gatekeeper']['public']
     jump_command = 'ssh -i {} -o BatchMode=yes -o StrictHostKeyChecking=no -W %h:%p {}'.format(key, jump)
     lag = {}
-    for name in ('replica1', 'replica2'):
+    for name in REPLICAS:
         cmd = ['ssh', '-i', key, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no',
                '-o', 'ConnectTimeout=7', '-o', 'ProxyCommand=' + jump_command,
                'ubuntu@' + state['ips'][name]['private'],

@@ -1,6 +1,6 @@
 # LOG8415E — Cloud Design Patterns
 
-AWS Academy Learner Lab project: six EC2 instances, with a public Gatekeeper, private Trusted Host and Proxy, and a self-managed MySQL 8 primary with two asynchronous replicas. Sakila is loaded on the primary and replicated to both replicas.
+AWS Academy Learner Lab project: seven EC2 instances, with a public Gatekeeper, private Trusted Host and Proxy, and a self-managed MySQL 8 primary with three asynchronous replicas. Sakila is loaded on the primary and replicated to all three replicas.
 
 ## Requirements
 
@@ -17,9 +17,9 @@ source .venv/bin/activate
 ./scripts/deploy.sh
 ```
 
-This provisions six EC2 instances, configures MySQL + Sakila + replication, and installs the Proxy, Trusted Host and Gatekeeper. The MySQL installer corrects Ubuntu's default loopback-only `bind-address` for inter-instance connectivity. Only the Gatekeeper has a public IP. Private ingress is limited to the respective Security Group peers.
+This provisions seven EC2 instances, configures MySQL + Sakila + replication, and installs the Proxy, Trusted Host and Gatekeeper. The MySQL installer corrects Ubuntu's default loopback-only `bind-address` for inter-instance connectivity. Only the Gatekeeper has a public IP. Private ingress is limited to the respective Security Group peers.
 
-**If the six EC2 instances are already running, do not rerun deploy.** To install or update just the application components:
+**If the seven EC2 instances are already running, do not rerun deploy.** To install or update just the application components:
 
 ```bash
 ./scripts/setup_proxy.sh
@@ -34,7 +34,7 @@ This provisions six EC2 instances, configures MySQL + Sakila + replication, and 
 ./scripts/verify.sh
 ```
 
-Both replicas must show `IO=Yes`, `SQL=Yes` and 1,000 Sakila film records. To send a request from the lab terminal through the **public endpoint** (all services in the required path):
+All three replicas must show `IO=Yes`, `SQL=Yes` and 1,000 Sakila film records. To send a request from the lab terminal through the **public endpoint** (all services in the required path):
 
 ```bash
 source scripts/common.sh

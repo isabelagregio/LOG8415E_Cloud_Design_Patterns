@@ -11,16 +11,18 @@ import pymysql
 
 CONFIG = json.loads(Path('/opt/log8415e/proxy.json').read_text())
 HOSTS = CONFIG['hosts']
+# Odd number of replicas (instructor best practice); replication remains asynchronous.
+REPLICAS = ('replica1', 'replica2', 'replica3')
 
 
 def choose_host(policy):
     if policy == 'direct':
         return 'primary'
     if policy == 'random':
-        return random.choice(['replica1', 'replica2'])
+        return random.choice(REPLICAS)
     if policy == 'latency':
         delays = {}
-        for name in ('replica1', 'replica2'):
+        for name in REPLICAS:
             start = time.monotonic()
             try:
                 connection = pymysql.connect(
@@ -37,7 +39,7 @@ def choose_host(policy):
             except (pymysql.MySQLError, OSError):
                 continue
         if not delays:
-            raise ConnectionError('Neither replica is reachable')
+            raise ConnectionError('No replica is reachable')
         return min(delays, key=delays.get)
     raise ValueError('policy must be direct, random or latency')
 
